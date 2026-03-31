@@ -1,14 +1,14 @@
 <?php
 /**
  * Plugin Name: GD Site Hardening
- * Description: Garrett Digital agency-standard WordPress hardening. Disables comments, restricts REST API and XML-RPC, removes emoji scripts, adds dashboard support widget, disables author archives, removes version info, disables application passwords, and warns when search engine indexing is blocked. Each feature is independently toggleable via wp-config.php constants.
- * Version: 1.2.0
+ * Description: Garrett Digital agency-standard WordPress hardening. 18 features, all independently toggleable via wp-config.php constants. Disables comments, restricts REST API (auto and strict modes), blocks XML-RPC abuse, removes emoji scripts, adds dashboard support widget, disables author archives, removes version info, disables application passwords, detects environment type with colored admin bar, disables admin email verification nag, obscures login errors, adds custom admin footer, limits post revisions, throttles Heartbeat API, disables oEmbed discovery, and warns when search engine indexing is blocked.
+ * Version: 1.3.0
  * Author: Garrett Digital
  * Author URI: https://www.garrettdigital.com
  *
  * INSTALLATION
  * ============
- * Upload this file to: /wp-content/mu-plugins/gd-site-hardening.php
+ * Upload this file to: /wp-content/mu-plugins/gd-wordpress-harden.php
  * It activates automatically. No settings page — configured via constants.
  *
  * CONFIGURATION
@@ -27,9 +27,30 @@
  *   define( 'GD_NOINDEX_WARNING',         false ); // Hide noindex warning banner
  *   define( 'GD_STATUS_PAGE',             false ); // Hide the status page
  *   define( 'GD_DISABLE_APP_PASSWORDS',   false ); // Keep application passwords enabled
+ *   define( 'GD_ENVIRONMENT_AWARENESS',   false ); // Skip environment detection and admin bar coloring
+ *   define( 'GD_DISABLE_ADMIN_EMAIL_CHECK', false ); // Keep admin email verification nag
+ *   define( 'GD_OBSCURE_LOGIN_ERRORS',    false ); // Keep specific login error messages
+ *   define( 'GD_CUSTOM_ADMIN_FOOTER',     false ); // Keep default WordPress admin footer
+ *   define( 'GD_LIMIT_REVISIONS',         false ); // Keep unlimited post revisions
+ *   define( 'GD_THROTTLE_HEARTBEAT',      false ); // Keep default heartbeat interval (15s)
+ *   define( 'GD_DISABLE_OEMBED_DISCOVERY', false ); // Keep oEmbed discovery enabled
  *
- * REST API NAMESPACE WHITELIST
- * ============================
+ * REST API MODE
+ * ==============
+ * Two modes for REST API restriction:
+ *
+ *   'auto'   (default) — All plugin endpoints work automatically.
+ *                         Only sensitive core endpoints are blocked
+ *                         (users, settings, application-passwords,
+ *                         plugins, themes, widgets). Best for most sites.
+ *
+ *   'strict' — Everything blocked unless namespace is whitelisted.
+ *              Use on high-security sites where you control the stack.
+ *
+ *   define( 'GD_REST_MODE', 'strict' );
+ *
+ * REST API NAMESPACE WHITELIST (strict mode only)
+ * ================================================
  * Plugins that need public REST API access (Contact Form 7, Formidable,
  * WooCommerce, etc.) are whitelisted by default. To add more:
  *
@@ -73,6 +94,15 @@
  *
  * CHANGELOG
  * =========
+ * 1.3.0 - Added auto/strict REST API modes (auto default: all plugin endpoints
+ *         work automatically, only sensitive core endpoints blocked). Added
+ *         environment awareness (colored admin bar, auto-suppressed noindex
+ *         warning on staging/dev, DISALLOW_FILE_EDIT production warning).
+ *         Added admin email verification nag disable. Added login error
+ *         message obscuring. Added custom admin footer with agency branding.
+ *         Added post revision limiting (default 10). Added Heartbeat API
+ *         throttling on non-editor pages (60s). Added oEmbed discovery
+ *         disable. Total features: 18, all independently toggleable.
  * 1.2.0 - Added Kadence (kb, kadence) to REST API whitelist. Moved comment DB
  *         cleanup to admin_init (off front-end requests). Removed REST API link
  *         and shortlink from wp_head. Added application passwords disable.
@@ -84,7 +114,7 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-define( 'GD_HARDENING_VERSION', '1.2.0' );
+define( 'GD_HARDENING_VERSION', '1.3.0' );
 
 /**
  * Helper: check if a feature is enabled.
@@ -183,8 +213,23 @@ if ( gd_feature_enabled( 'GD_DISABLE_COMMENTS' ) ) {
 // =====================================================================
 // 2. RESTRICT REST API
 // =====================================================================
-// Limits REST API access to administrators (manage_options) by default.
-// Plugin namespaces that need public access are whitelisted.
+// Two modes controlled by GD_REST_MODE:
+//
+//   'auto'   (default) — Allows all plugin REST endpoints. Blocks only
+//                         sensitive core endpoints (users, settings,
+//                         application-passwords). This is the right
+//                         choice for most sites. Plugins handle their
+//                         own authentication on their own endpoints.
+//
+//   'strict' — Blocks ALL REST endpoints for non-admins unless the
+//              namespace is in the hardcoded whitelist. Use this on
+//              sites that need full lockdown and where you control
+//              exactly which plugins need public REST access.
+//
+//   define( 'GD_REST_MODE', 'strict' ); // in wp-config.php
+//
+// In both modes, user enumeration via /wp/v2/users is always blocked
+// for non-admins.
 // =====================================================================
 
 if ( gd_feature_enabled( 'GD_RESTRICT_REST_API' ) ) {
@@ -202,13 +247,37 @@ if ( gd_feature_enabled( 'GD_RESTRICT_REST_API' ) ) {
             return $result;
         }
 
-        // Check if the request matches a whitelisted namespace.
         $request_uri = isset( $_SERVER['REQUEST_URI'] ) ? $_SERVER['REQUEST_URI'] : '';
+        $mode = defined( 'GD_REST_MODE' ) ? GD_REST_MODE : 'auto';
 
-        // Build the whitelist.
+        // ── AUTO MODE ──
+        // Allow everything except sensitive core endpoints.
+        // Plugins register their own REST routes and handle their own
+        // authentication. We only need to protect the WordPress core
+        // endpoints that expose sensitive data.
+        if ( 'auto' === $mode ) {
+
+            $blocked = gd_get_blocked_endpoints();
+
+            foreach ( $blocked as $endpoint ) {
+                if ( strpos( $request_uri, '/wp-json/' . $endpoint ) !== false
+                    || strpos( $request_uri, '?rest_route=/' . $endpoint ) !== false ) {
+                    return new WP_Error(
+                        'rest_forbidden',
+                        'REST API access restricted.',
+                        array( 'status' => 403 )
+                    );
+                }
+            }
+
+            // Everything else passes through in auto mode.
+            return $result;
+        }
+
+        // ── STRICT MODE ──
+        // Block everything unless the namespace is whitelisted.
         $whitelisted = gd_get_rest_whitelist();
 
-        // Check if the request URI contains a whitelisted namespace.
         foreach ( $whitelisted as $namespace ) {
             if ( strpos( $request_uri, '/wp-json/' . $namespace ) !== false
                 || strpos( $request_uri, '?rest_route=/' . $namespace ) !== false ) {
@@ -216,7 +285,6 @@ if ( gd_feature_enabled( 'GD_RESTRICT_REST_API' ) ) {
             }
         }
 
-        // Block everything else for unauthenticated/non-admin users.
         return new WP_Error(
             'rest_forbidden',
             'REST API access restricted.',
@@ -224,7 +292,7 @@ if ( gd_feature_enabled( 'GD_RESTRICT_REST_API' ) ) {
         );
     }, 20 );
 
-    // Block user enumeration via REST API specifically.
+    // Block user enumeration via REST API in both modes.
     add_filter( 'rest_endpoints', function ( $endpoints ) {
         if ( ! current_user_can( 'manage_options' ) ) {
             unset( $endpoints['/wp/v2/users'] );
@@ -235,7 +303,38 @@ if ( gd_feature_enabled( 'GD_RESTRICT_REST_API' ) ) {
 }
 
 /**
- * Get the REST API namespace whitelist.
+ * Sensitive core endpoints blocked in auto mode.
+ * These expose user data, site settings, or authentication tokens
+ * that should not be accessible to unauthenticated requests.
+ *
+ * To add more blocked endpoints:
+ *   define( 'GD_REST_EXTRA_BLOCKED', 'wp/v2/comments,wp/v2/search' );
+ */
+function gd_get_blocked_endpoints() {
+    $blocked = array(
+        'wp/v2/users',                    // Username enumeration
+        'wp/v2/settings',                 // Site configuration
+        'wp/v2/application-passwords',    // API token management
+        'wp/v2/plugins',                  // Plugin list and status
+        'wp/v2/themes',                   // Theme list and status
+        'wp/v2/block-types',              // Registered block info
+        'wp/v2/sidebars',                 // Widget areas
+        'wp/v2/widget-types',             // Available widget types
+        'wp/v2/widgets',                  // Active widgets
+    );
+
+    if ( defined( 'GD_REST_EXTRA_BLOCKED' ) && GD_REST_EXTRA_BLOCKED ) {
+        $extras = array_map( 'trim', explode( ',', GD_REST_EXTRA_BLOCKED ) );
+        $blocked = array_merge( $blocked, $extras );
+    }
+
+    return $blocked;
+}
+
+/**
+ * Namespace whitelist for STRICT mode only.
+ * Not used in auto mode (auto mode allows all namespaces
+ * and blocks only specific sensitive endpoints).
  */
 function gd_get_rest_whitelist() {
     $whitelisted = array(
@@ -436,7 +535,236 @@ if ( gd_feature_enabled( 'GD_DISABLE_APP_PASSWORDS' ) ) {
 }
 
 // =====================================================================
-// 9. NOINDEX WARNING BANNER
+// 9. ENVIRONMENT AWARENESS
+// =====================================================================
+// Detects WP_ENVIRONMENT_TYPE (local, development, staging, production)
+// and adjusts behavior automatically:
+//   - Colors the admin bar so you never confuse staging with production
+//   - Labels the environment in the admin bar
+//   - Suppresses the noindex warning on non-production (noindex expected)
+//   - On production: warns if DISALLOW_FILE_EDIT is not set
+//
+// WP_ENVIRONMENT_TYPE is a WordPress 5.5+ constant. Most managed hosts
+// (GridPane, WP Engine, Kinsta, etc.) set it automatically. If not set,
+// the plugin defaults to 'production' (safest assumption).
+//
+//   define( 'WP_ENVIRONMENT_TYPE', 'staging' ); // in wp-config.php
+// =====================================================================
+
+if ( gd_feature_enabled( 'GD_ENVIRONMENT_AWARENESS' ) ) {
+
+    add_action( 'admin_head', 'gd_environment_admin_bar_color' );
+    add_action( 'wp_head', 'gd_environment_admin_bar_color' );
+
+    // Warn on production if DISALLOW_FILE_EDIT is not enforced.
+    add_action( 'admin_notices', function () {
+        if ( 'production' !== gd_get_environment_type() ) {
+            return;
+        }
+        if ( defined( 'DISALLOW_FILE_EDIT' ) && DISALLOW_FILE_EDIT ) {
+            return;
+        }
+        if ( ! current_user_can( 'manage_options' ) ) {
+            return;
+        }
+        echo '<div class="notice notice-warning"><p>';
+        echo '<strong>GD Hardening:</strong> This is a production site but <code>DISALLOW_FILE_EDIT</code> is not enabled. ';
+        echo 'Add <code>define( \'DISALLOW_FILE_EDIT\', true );</code> to <code>wp-config.php</code>.';
+        echo '</p></div>';
+    });
+}
+
+/**
+ * Get the current WordPress environment type.
+ * Returns: local, development, staging, or production.
+ */
+function gd_get_environment_type() {
+    if ( function_exists( 'wp_get_environment_type' ) ) {
+        return wp_get_environment_type();
+    }
+    return 'production';
+}
+
+/**
+ * Color the admin bar based on environment type.
+ */
+function gd_environment_admin_bar_color() {
+    if ( ! is_admin_bar_showing() ) {
+        return;
+    }
+
+    $env = gd_get_environment_type();
+
+    $env_config = array(
+        'local'       => array( 'color' => '#00a32a', 'label' => 'LOCAL' ),
+        'development' => array( 'color' => '#d63638', 'label' => 'DEV' ),
+        'staging'     => array( 'color' => '#dba617', 'label' => 'STAGING' ),
+    );
+
+    if ( ! isset( $env_config[ $env ] ) ) {
+        return;
+    }
+
+    $color = $env_config[ $env ]['color'];
+    $label = $env_config[ $env ]['label'];
+
+    echo '<style>';
+    echo '#wpadminbar { background: ' . esc_attr( $color ) . ' !important; }';
+    echo '#wpadminbar .ab-empty-item, #wpadminbar a.ab-item, #wpadminbar > #wp-toolbar span.ab-label, #wpadminbar > #wp-toolbar span.noticon { color: #fff !important; }';
+    echo '#wpadminbar .ab-item::before, #wpadminbar #adminbarsearch::before { color: rgba(255,255,255,0.8) !important; }';
+    echo '#wpadminbar::after { content: "' . esc_attr( $label ) . '"; position: fixed; right: 10px; top: 0; color: rgba(255,255,255,0.7); font-size: 11px; font-weight: 700; letter-spacing: 1px; line-height: 32px; z-index: 99999; pointer-events: none; }';
+    echo '</style>';
+}
+
+// =====================================================================
+// 10. DISABLE ADMIN EMAIL VERIFICATION
+// =====================================================================
+// WordPress periodically asks administrators to verify their email
+// address (every 6 months). On agency-managed client sites, this
+// causes confusion and support tickets. Clients don't understand
+// the prompt and often ignore it, creating a nagging overlay on
+// every admin page visit until they deal with it.
+// =====================================================================
+
+if ( gd_feature_enabled( 'GD_DISABLE_ADMIN_EMAIL_CHECK' ) ) {
+
+    add_filter( 'admin_email_check_interval', '__return_false' );
+}
+
+// =====================================================================
+// 11. OBSCURE LOGIN ERROR MESSAGES
+// =====================================================================
+// By default, WordPress tells you whether the username OR the password
+// was wrong ("Unknown username" vs "Incorrect password for user X").
+// This helps attackers confirm valid usernames. This feature replaces
+// all login error messages with a generic response that doesn't
+// reveal which credential was incorrect.
+// =====================================================================
+
+if ( gd_feature_enabled( 'GD_OBSCURE_LOGIN_ERRORS' ) ) {
+
+    add_filter( 'login_errors', function () {
+        return '<strong>Error:</strong> The username or password you entered is incorrect. <a href="' . esc_url( wp_lostpassword_url() ) . '">Lost your password?</a>';
+    });
+}
+
+// =====================================================================
+// 12. CUSTOM ADMIN FOOTER
+// =====================================================================
+// Replaces the default "Thank you for creating with WordPress" admin
+// footer with your agency branding. Configurable via constants.
+// Links to the same URL as the dashboard support widget by default.
+// =====================================================================
+
+if ( gd_feature_enabled( 'GD_CUSTOM_ADMIN_FOOTER' ) ) {
+
+    add_filter( 'admin_footer_text', function () {
+        $name = defined( 'GD_SUPPORT_NAME' ) ? GD_SUPPORT_NAME : 'Garrett Digital';
+        $url  = defined( 'GD_SUPPORT_URL' )  ? GD_SUPPORT_URL  : 'https://www.garrettdigital.com';
+        return 'Built by <a href="' . esc_url( $url ) . '" target="_blank" rel="noopener">' . esc_html( $name ) . '</a>';
+    });
+
+    // Remove the WordPress version from the right side of the footer.
+    add_filter( 'update_footer', '__return_empty_string', 11 );
+}
+
+// =====================================================================
+// 13. LIMIT POST REVISIONS
+// =====================================================================
+// WordPress stores unlimited post revisions by default, which bloats
+// the database over time. This enforces a sensible default (10) unless
+// WP_POST_REVISIONS is already defined in wp-config.php.
+//
+// Override the default:
+//   define( 'GD_REVISION_LIMIT', 20 ); // Store up to 20 revisions
+//
+// Or disable the limit entirely by setting WP_POST_REVISIONS in
+// wp-config.php before this plugin loads (MU plugins load first,
+// but wp-config.php constants are set before any plugins).
+// =====================================================================
+
+if ( gd_feature_enabled( 'GD_LIMIT_REVISIONS' ) ) {
+
+    // Only set the limit if WordPress core constant is not already defined.
+    // wp-config.php constants are set before MU plugins load, so if
+    // WP_POST_REVISIONS exists, the site owner made a deliberate choice.
+    if ( ! defined( 'WP_POST_REVISIONS' ) ) {
+        $limit = defined( 'GD_REVISION_LIMIT' ) ? (int) GD_REVISION_LIMIT : 10;
+        define( 'WP_POST_REVISIONS', $limit );
+    }
+}
+
+// =====================================================================
+// 14. THROTTLE HEARTBEAT API
+// =====================================================================
+// The WordPress Heartbeat API sends AJAX requests every 15 seconds on
+// all admin pages. On the post editor, this powers autosave and
+// collaborative editing — useful. On the dashboard and post list pages,
+// it just burns server resources.
+//
+// This throttles the heartbeat to 60 seconds on non-editor pages and
+// leaves it at the default (15 seconds) on the post editor where
+// autosave matters.
+//
+// Override the interval:
+//   define( 'GD_HEARTBEAT_INTERVAL', 30 ); // seconds (15-120)
+// =====================================================================
+
+if ( gd_feature_enabled( 'GD_THROTTLE_HEARTBEAT' ) ) {
+
+    add_action( 'init', function () {
+
+        // Don't touch the post editor — autosave needs the fast heartbeat.
+        global $pagenow;
+        if ( 'post.php' === $pagenow || 'post-new.php' === $pagenow ) {
+            return;
+        }
+
+        $interval = defined( 'GD_HEARTBEAT_INTERVAL' ) ? (int) GD_HEARTBEAT_INTERVAL : 60;
+        $interval = max( 15, min( 120, $interval ) ); // Clamp to valid range.
+
+        add_filter( 'heartbeat_settings', function ( $settings ) use ( $interval ) {
+            $settings['interval'] = $interval;
+            return $settings;
+        });
+    });
+}
+
+// =====================================================================
+// 15. DISABLE oEMBED DISCOVERY
+// =====================================================================
+// WordPress lets other sites embed your content with a preview card
+// (like how Twitter shows link previews). This feature disables the
+// discovery endpoint and removes the oEmbed-related tags from <head>.
+//
+// This is different from CONSUMING oEmbeds (embedding YouTube videos,
+// tweets, etc. in your own content), which still works normally.
+//
+// Most agency and business sites don't benefit from being embeddable
+// by external sites, and the discovery endpoint adds an unnecessary
+// public API surface.
+// =====================================================================
+
+if ( gd_feature_enabled( 'GD_DISABLE_OEMBED_DISCOVERY' ) ) {
+
+    // Remove oEmbed discovery link from <head>.
+    remove_action( 'wp_head', 'wp_oembed_add_discovery_links' );
+
+    // Remove oEmbed-specific JavaScript from front end.
+    remove_action( 'wp_head', 'wp_oembed_add_host_js' );
+
+    // Disable the oEmbed REST API endpoint for external consumers.
+    add_filter( 'rest_endpoints', function ( $endpoints ) {
+        unset( $endpoints['/oembed/1.0/embed'] );
+        return $endpoints;
+    });
+
+    // Remove oEmbed response headers.
+    remove_filter( 'template_redirect', 'rest_output_link_header', 11 );
+}
+
+// =====================================================================
+// 16. NOINDEX WARNING BANNER
 // =====================================================================
 // Shows a persistent red banner across the top of every admin page
 // when the site is set to discourage search engines. Checks:
@@ -454,6 +782,14 @@ if ( gd_feature_enabled( 'GD_NOINDEX_WARNING' ) ) {
 }
 
 function gd_noindex_warning_notice() {
+
+    // In non-production environments, noindex is expected. Don't nag.
+    if ( gd_feature_enabled( 'GD_ENVIRONMENT_AWARENESS' ) ) {
+        $env = gd_get_environment_type();
+        if ( 'production' !== $env ) {
+            return;
+        }
+    }
 
     $warnings = gd_detect_noindex_settings();
 
@@ -535,6 +871,13 @@ function gd_detect_noindex_settings() {
 }
 
 function gd_noindex_warning_styles() {
+
+    // Match the notice suppression — no styles needed on non-production.
+    if ( gd_feature_enabled( 'GD_ENVIRONMENT_AWARENESS' ) ) {
+        if ( 'production' !== gd_get_environment_type() ) {
+            return;
+        }
+    }
 
     if ( empty( gd_detect_noindex_settings() ) ) {
         return;
@@ -669,6 +1012,41 @@ function gd_render_status_page() {
             'desc'     => 'Removes WP 5.6+ application passwords feature. Reduces API attack surface.',
         ),
         array(
+            'label'    => 'Environment Awareness',
+            'constant' => 'GD_ENVIRONMENT_AWARENESS',
+            'desc'     => 'Colors admin bar by environment, suppresses noindex warning on staging/dev, warns about DISALLOW_FILE_EDIT on production.',
+        ),
+        array(
+            'label'    => 'Disable Admin Email Check',
+            'constant' => 'GD_DISABLE_ADMIN_EMAIL_CHECK',
+            'desc'     => 'Removes the periodic admin email verification nag screen.',
+        ),
+        array(
+            'label'    => 'Obscure Login Errors',
+            'constant' => 'GD_OBSCURE_LOGIN_ERRORS',
+            'desc'     => 'Replaces specific login error messages with a generic response. Prevents username enumeration via login.',
+        ),
+        array(
+            'label'    => 'Custom Admin Footer',
+            'constant' => 'GD_CUSTOM_ADMIN_FOOTER',
+            'desc'     => 'Replaces default WordPress admin footer with agency branding. Uses GD_SUPPORT_NAME and GD_SUPPORT_URL.',
+        ),
+        array(
+            'label'    => 'Limit Post Revisions',
+            'constant' => 'GD_LIMIT_REVISIONS',
+            'desc'     => 'Caps post revisions at 10 (default). Override with GD_REVISION_LIMIT or WP_POST_REVISIONS.',
+        ),
+        array(
+            'label'    => 'Throttle Heartbeat API',
+            'constant' => 'GD_THROTTLE_HEARTBEAT',
+            'desc'     => 'Slows Heartbeat to 60s on non-editor pages. Editor pages keep the 15s default for autosave.',
+        ),
+        array(
+            'label'    => 'Disable oEmbed Discovery',
+            'constant' => 'GD_DISABLE_OEMBED_DISCOVERY',
+            'desc'     => 'Prevents other sites from embedding your content. Consuming oEmbeds (YouTube, etc.) still works.',
+        ),
+        array(
             'label'    => 'Noindex Warning Banner',
             'constant' => 'GD_NOINDEX_WARNING',
             'desc'     => 'Red banner on all admin pages when search indexing is blocked.',
@@ -729,12 +1107,25 @@ function gd_render_status_page() {
         </table>
 
         <?php // ---- REST API details ---- ?>
-        <?php if ( gd_feature_enabled( 'GD_RESTRICT_REST_API' ) ) : ?>
+        <?php if ( gd_feature_enabled( 'GD_RESTRICT_REST_API' ) ) :
+            $rest_mode = defined( 'GD_REST_MODE' ) ? GD_REST_MODE : 'auto';
+        ?>
         <h2 style="margin-top: 30px;">REST API Configuration</h2>
         <table class="widefat fixed striped" style="max-width: 920px;">
             <tbody>
                 <tr>
-                    <th style="width: 26%;">Required Capability</th>
+                    <th style="width: 26%;">Mode</th>
+                    <td>
+                        <code><?php echo esc_html( $rest_mode ); ?></code>
+                        <?php if ( 'auto' === $rest_mode ) : ?>
+                            <span style="color: #666; font-size: 12px;">(default &mdash; all plugin endpoints allowed, sensitive core endpoints blocked)</span>
+                        <?php else : ?>
+                            <span style="color: #666; font-size: 12px;">(all endpoints blocked unless namespace is whitelisted)</span>
+                        <?php endif; ?>
+                    </td>
+                </tr>
+                <tr>
+                    <th>Required Capability</th>
                     <td>
                         <code><?php echo esc_html( defined( 'GD_REST_CAPABILITY' ) ? GD_REST_CAPABILITY : 'manage_options' ); ?></code>
                         <?php if ( ! defined( 'GD_REST_CAPABILITY' ) ) : ?>
@@ -742,6 +1133,18 @@ function gd_render_status_page() {
                         <?php endif; ?>
                     </td>
                 </tr>
+                <?php if ( 'auto' === $rest_mode ) : ?>
+                <tr>
+                    <th>Blocked Endpoints</th>
+                    <td>
+                        <?php
+                        foreach ( gd_get_blocked_endpoints() as $ep ) {
+                            echo '<code style="display: inline-block; margin: 2px 4px 2px 0; padding: 2px 8px; background: #fcf0f0; border-radius: 3px; font-size: 12px; color: #b32d2e;">' . esc_html( $ep ) . '</code>';
+                        }
+                        ?>
+                    </td>
+                </tr>
+                <?php else : ?>
                 <tr>
                     <th>Whitelisted Namespaces</th>
                     <td>
@@ -763,6 +1166,7 @@ function gd_render_status_page() {
                         <?php endif; ?>
                     </td>
                 </tr>
+                <?php endif; ?>
                 <tr>
                     <th>User Enumeration</th>
                     <td>
@@ -823,12 +1227,52 @@ function gd_render_status_page() {
         <table class="widefat fixed striped" style="max-width: 920px;">
             <tbody>
                 <tr>
-                    <th style="width: 26%;">WordPress Version</th>
+                    <th style="width: 26%;">Environment Type</th>
+                    <td>
+                        <?php
+                        $env = gd_get_environment_type();
+                        $env_colors = array( 'local' => '#00a32a', 'development' => '#d63638', 'staging' => '#dba617', 'production' => '#2271b1' );
+                        $env_color = isset( $env_colors[ $env ] ) ? $env_colors[ $env ] : '#666';
+                        ?>
+                        <span style="display: inline-block; padding: 2px 10px; background: <?php echo esc_attr( $env_color ); ?>; color: #fff; border-radius: 3px; font-size: 12px; font-weight: 600; letter-spacing: 0.5px;">
+                            <?php echo esc_html( strtoupper( $env ) ); ?>
+                        </span>
+                        <?php if ( ! defined( 'WP_ENVIRONMENT_TYPE' ) ) : ?>
+                            <span style="color: #666; font-size: 12px;">(not set &mdash; defaulting to production)</span>
+                        <?php endif; ?>
+                    </td>
+                </tr>
+                <tr>
+                    <th>WordPress Version</th>
                     <td><?php echo esc_html( get_bloginfo( 'version' ) ); ?></td>
                 </tr>
                 <tr>
                     <th>PHP Version</th>
                     <td><?php echo esc_html( phpversion() ); ?></td>
+                </tr>
+                <tr>
+                    <th>Post Revisions Limit</th>
+                    <td>
+                        <?php if ( defined( 'WP_POST_REVISIONS' ) ) : ?>
+                            <code><?php echo esc_html( WP_POST_REVISIONS ); ?></code>
+                            <?php if ( true === WP_POST_REVISIONS ) : ?>
+                                <span style="color: #dba617; font-size: 12px;">(unlimited)</span>
+                            <?php endif; ?>
+                        <?php else : ?>
+                            <span style="color: #999;">Not set (WordPress default: unlimited)</span>
+                        <?php endif; ?>
+                    </td>
+                </tr>
+                <tr>
+                    <th>File Editing</th>
+                    <td>
+                        <?php if ( defined( 'DISALLOW_FILE_EDIT' ) && DISALLOW_FILE_EDIT ) : ?>
+                            <span style="color: #00a32a; font-weight: 600;">&#10003; Disabled</span>
+                        <?php else : ?>
+                            <span style="color: #dba617; font-weight: 600;">&#9888; Enabled</span>
+                            <span style="color: #666; font-size: 12px;">(add DISALLOW_FILE_EDIT to wp-config.php)</span>
+                        <?php endif; ?>
+                    </td>
                 </tr>
                 <tr>
                     <th>Plugin File</th>
