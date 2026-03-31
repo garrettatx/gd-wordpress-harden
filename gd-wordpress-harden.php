@@ -2,38 +2,52 @@
 /**
  * Plugin Name: GD Site Hardening
  * Description: Garrett Digital agency-standard WordPress hardening. 18 features, all independently toggleable via wp-config.php constants. Disables comments, restricts REST API (auto and strict modes), blocks XML-RPC abuse, removes emoji scripts, adds dashboard support widget, disables author archives, removes version info, disables application passwords, detects environment type with colored admin bar, disables admin email verification nag, obscures login errors, adds custom admin footer, limits post revisions, throttles Heartbeat API, disables oEmbed discovery, and warns when search engine indexing is blocked.
- * Version: 1.3.0
+ * Version: 1.3.1
  * Author: Garrett Digital
  * Author URI: https://www.garrettdigital.com
  *
  * INSTALLATION
  * ============
- * Upload this file to: /wp-content/mu-plugins/gd-wordpress-harden.php
+ * Upload this file to: /wp-content/mu-plugins/gd-site-hardening.php
  * It activates automatically. No settings page — configured via constants.
  *
  * CONFIGURATION
  * =============
- * Every feature is ON by default. To disable a specific feature,
- * add the corresponding constant to wp-config.php:
+ * Every feature is ON by default. You only need to add a constant
+ * to wp-config.php if you want to TURN SOMETHING OFF.
  *
- *   define( 'GD_DISABLE_COMMENTS',        false ); // Keep comments enabled
- *   define( 'GD_RESTRICT_REST_API',       false ); // Leave REST API open
- *   define( 'GD_RESTRICT_XMLRPC',         false ); // Leave XML-RPC open
- *   define( 'GD_REMOVE_EMOJI',            false ); // Keep emoji scripts
- *   define( 'GD_DASHBOARD_WIDGET',        false ); // Skip support widget
- *   define( 'GD_DISABLE_AUTHOR_ARCHIVES', false ); // Keep author archives
- *   define( 'GD_REMOVE_WP_VERSION',       false ); // Keep WP version in head
- *   define( 'GD_DISABLE_SELF_PINGBACKS',  false ); // Keep self-pingbacks
- *   define( 'GD_NOINDEX_WARNING',         false ); // Hide noindex warning banner
- *   define( 'GD_STATUS_PAGE',             false ); // Hide the status page
- *   define( 'GD_DISABLE_APP_PASSWORDS',   false ); // Keep application passwords enabled
- *   define( 'GD_ENVIRONMENT_AWARENESS',   false ); // Skip environment detection and admin bar coloring
- *   define( 'GD_DISABLE_ADMIN_EMAIL_CHECK', false ); // Keep admin email verification nag
- *   define( 'GD_OBSCURE_LOGIN_ERRORS',    false ); // Keep specific login error messages
- *   define( 'GD_CUSTOM_ADMIN_FOOTER',     false ); // Keep default WordPress admin footer
- *   define( 'GD_LIMIT_REVISIONS',         false ); // Keep unlimited post revisions
- *   define( 'GD_THROTTLE_HEARTBEAT',      false ); // Keep default heartbeat interval (15s)
- *   define( 'GD_DISABLE_OEMBED_DISCOVERY', false ); // Keep oEmbed discovery enabled
+ * How it works:
+ *   true  (or not set) = feature is ON
+ *   false              = feature is OFF
+ *
+ * Example: To turn off comment blocking (let comments work normally):
+ *   define( 'GD_BLOCK_COMMENTS', false );
+ *
+ * All toggles:
+ *
+ *   SECURITY
+ *   define( 'GD_BLOCK_COMMENTS',      false ); // Comments work normally
+ *   define( 'GD_LOCK_REST_API',       false ); // REST API stays open
+ *   define( 'GD_LOCK_XMLRPC',         false ); // XML-RPC stays open
+ *   define( 'GD_BLOCK_APP_PASSWORDS', false ); // Application passwords enabled
+ *   define( 'GD_HIDE_LOGIN_ERRORS',   false ); // Specific login error messages shown
+ *   define( 'GD_BLOCK_AUTHOR_PAGES',  false ); // Author archive pages work
+ *   define( 'GD_HIDE_VERSION',        false ); // WordPress version visible in source
+ *   define( 'GD_BLOCK_SELF_PINGS',    false ); // Self-pingbacks allowed
+ *
+ *   ENVIRONMENT & PERFORMANCE
+ *   define( 'GD_ENV_AWARENESS',       false ); // No colored admin bar or environment detection
+ *   define( 'GD_STRIP_EMOJI',         false ); // Emoji scripts stay loaded
+ *   define( 'GD_CAP_REVISIONS',       false ); // Unlimited post revisions
+ *   define( 'GD_SLOW_HEARTBEAT',      false ); // Default 15s heartbeat everywhere
+ *   define( 'GD_BLOCK_OEMBED',        false ); // oEmbed discovery stays on
+ *
+ *   ADMIN UX
+ *   define( 'GD_SUPPORT_WIDGET',      false ); // Default WordPress dashboard widget
+ *   define( 'GD_BLOCK_EMAIL_NAG',     false ); // Admin email verification nag shows
+ *   define( 'GD_AGENCY_FOOTER',       false ); // Default WordPress admin footer
+ *   define( 'GD_NOINDEX_WARNING',     false ); // Noindex warning banner hidden
+ *   define( 'GD_STATUS_PAGE',         false ); // Status page hidden
  *
  * REST API MODE
  * ==============
@@ -94,6 +108,9 @@
  *
  * CHANGELOG
  * =========
+ * 1.3.1 - Renamed all constants for intuitive true/false toggling. No more
+ *         double negatives. true = feature ON, false = feature OFF. See
+ *         README for the full rename map.
  * 1.3.0 - Added auto/strict REST API modes (auto default: all plugin endpoints
  *         work automatically, only sensitive core endpoints blocked). Added
  *         environment awareness (colored admin bar, auto-suppressed noindex
@@ -114,7 +131,7 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-define( 'GD_HARDENING_VERSION', '1.3.0' );
+define( 'GD_HARDENING_VERSION', '1.3.1' );
 
 /**
  * Helper: check if a feature is enabled.
@@ -136,7 +153,7 @@ function gd_feature_enabled( $constant ) {
 // "Disallowed Comment Keys" spam filter used by form plugins.
 // =====================================================================
 
-if ( gd_feature_enabled( 'GD_DISABLE_COMMENTS' ) ) {
+if ( gd_feature_enabled( 'GD_BLOCK_COMMENTS' ) ) {
 
     // Close comments and pingbacks on all post types.
     add_filter( 'comments_open', '__return_false', 20, 2 );
@@ -232,7 +249,7 @@ if ( gd_feature_enabled( 'GD_DISABLE_COMMENTS' ) ) {
 // for non-admins.
 // =====================================================================
 
-if ( gd_feature_enabled( 'GD_RESTRICT_REST_API' ) ) {
+if ( gd_feature_enabled( 'GD_LOCK_REST_API' ) ) {
 
     add_filter( 'rest_authentication_errors', function ( $result ) {
 
@@ -368,7 +385,7 @@ function gd_get_rest_whitelist() {
 // requests (brute force, pingback abuse) get blocked.
 // =====================================================================
 
-if ( gd_feature_enabled( 'GD_RESTRICT_XMLRPC' ) ) {
+if ( gd_feature_enabled( 'GD_LOCK_XMLRPC' ) ) {
 
     add_filter( 'xmlrpc_enabled', function () {
         return is_user_logged_in();
@@ -395,7 +412,7 @@ if ( gd_feature_enabled( 'GD_RESTRICT_XMLRPC' ) ) {
 // 4. REMOVE EMOJI SCRIPTS
 // =====================================================================
 
-if ( gd_feature_enabled( 'GD_REMOVE_EMOJI' ) ) {
+if ( gd_feature_enabled( 'GD_STRIP_EMOJI' ) ) {
 
     add_action( 'init', function () {
         remove_action( 'wp_head', 'print_emoji_detection_script', 7 );
@@ -429,7 +446,7 @@ if ( gd_feature_enabled( 'GD_REMOVE_EMOJI' ) ) {
 // 5. DASHBOARD SUPPORT WIDGET
 // =====================================================================
 
-if ( gd_feature_enabled( 'GD_DASHBOARD_WIDGET' ) ) {
+if ( gd_feature_enabled( 'GD_SUPPORT_WIDGET' ) ) {
 
     add_action( 'wp_dashboard_setup', function () {
         remove_meta_box( 'dashboard_primary', 'dashboard', 'side' );
@@ -469,7 +486,7 @@ function gd_render_support_widget() {
 // 6. DISABLE AUTHOR ARCHIVES
 // =====================================================================
 
-if ( gd_feature_enabled( 'GD_DISABLE_AUTHOR_ARCHIVES' ) ) {
+if ( gd_feature_enabled( 'GD_BLOCK_AUTHOR_PAGES' ) ) {
 
     add_action( 'template_redirect', function () {
         if ( is_author() ) {
@@ -490,7 +507,7 @@ if ( gd_feature_enabled( 'GD_DISABLE_AUTHOR_ARCHIVES' ) ) {
 // 7. REMOVE WORDPRESS VERSION
 // =====================================================================
 
-if ( gd_feature_enabled( 'GD_REMOVE_WP_VERSION' ) ) {
+if ( gd_feature_enabled( 'GD_HIDE_VERSION' ) ) {
 
     remove_action( 'wp_head', 'wp_generator' );
     add_filter( 'the_generator', '__return_empty_string' );
@@ -509,7 +526,7 @@ function gd_remove_version_query( $src ) {
 // 8. DISABLE SELF-PINGBACKS
 // =====================================================================
 
-if ( gd_feature_enabled( 'GD_DISABLE_SELF_PINGBACKS' ) ) {
+if ( gd_feature_enabled( 'GD_BLOCK_SELF_PINGS' ) ) {
 
     add_action( 'pre_ping', function ( &$links ) {
         $home = home_url();
@@ -529,7 +546,7 @@ if ( gd_feature_enabled( 'GD_DISABLE_SELF_PINGBACKS' ) ) {
 // they represent an additional attack surface if unused.
 // =====================================================================
 
-if ( gd_feature_enabled( 'GD_DISABLE_APP_PASSWORDS' ) ) {
+if ( gd_feature_enabled( 'GD_BLOCK_APP_PASSWORDS' ) ) {
 
     add_filter( 'wp_is_application_passwords_available', '__return_false' );
 }
@@ -551,7 +568,7 @@ if ( gd_feature_enabled( 'GD_DISABLE_APP_PASSWORDS' ) ) {
 //   define( 'WP_ENVIRONMENT_TYPE', 'staging' ); // in wp-config.php
 // =====================================================================
 
-if ( gd_feature_enabled( 'GD_ENVIRONMENT_AWARENESS' ) ) {
+if ( gd_feature_enabled( 'GD_ENV_AWARENESS' ) ) {
 
     add_action( 'admin_head', 'gd_environment_admin_bar_color' );
     add_action( 'wp_head', 'gd_environment_admin_bar_color' );
@@ -626,7 +643,7 @@ function gd_environment_admin_bar_color() {
 // every admin page visit until they deal with it.
 // =====================================================================
 
-if ( gd_feature_enabled( 'GD_DISABLE_ADMIN_EMAIL_CHECK' ) ) {
+if ( gd_feature_enabled( 'GD_BLOCK_EMAIL_NAG' ) ) {
 
     add_filter( 'admin_email_check_interval', '__return_false' );
 }
@@ -641,7 +658,7 @@ if ( gd_feature_enabled( 'GD_DISABLE_ADMIN_EMAIL_CHECK' ) ) {
 // reveal which credential was incorrect.
 // =====================================================================
 
-if ( gd_feature_enabled( 'GD_OBSCURE_LOGIN_ERRORS' ) ) {
+if ( gd_feature_enabled( 'GD_HIDE_LOGIN_ERRORS' ) ) {
 
     add_filter( 'login_errors', function () {
         return '<strong>Error:</strong> The username or password you entered is incorrect. <a href="' . esc_url( wp_lostpassword_url() ) . '">Lost your password?</a>';
@@ -656,7 +673,7 @@ if ( gd_feature_enabled( 'GD_OBSCURE_LOGIN_ERRORS' ) ) {
 // Links to the same URL as the dashboard support widget by default.
 // =====================================================================
 
-if ( gd_feature_enabled( 'GD_CUSTOM_ADMIN_FOOTER' ) ) {
+if ( gd_feature_enabled( 'GD_AGENCY_FOOTER' ) ) {
 
     add_filter( 'admin_footer_text', function () {
         $name = defined( 'GD_SUPPORT_NAME' ) ? GD_SUPPORT_NAME : 'Garrett Digital';
@@ -683,7 +700,7 @@ if ( gd_feature_enabled( 'GD_CUSTOM_ADMIN_FOOTER' ) ) {
 // but wp-config.php constants are set before any plugins).
 // =====================================================================
 
-if ( gd_feature_enabled( 'GD_LIMIT_REVISIONS' ) ) {
+if ( gd_feature_enabled( 'GD_CAP_REVISIONS' ) ) {
 
     // Only set the limit if WordPress core constant is not already defined.
     // wp-config.php constants are set before MU plugins load, so if
@@ -710,7 +727,7 @@ if ( gd_feature_enabled( 'GD_LIMIT_REVISIONS' ) ) {
 //   define( 'GD_HEARTBEAT_INTERVAL', 30 ); // seconds (15-120)
 // =====================================================================
 
-if ( gd_feature_enabled( 'GD_THROTTLE_HEARTBEAT' ) ) {
+if ( gd_feature_enabled( 'GD_SLOW_HEARTBEAT' ) ) {
 
     add_action( 'init', function () {
 
@@ -745,7 +762,7 @@ if ( gd_feature_enabled( 'GD_THROTTLE_HEARTBEAT' ) ) {
 // public API surface.
 // =====================================================================
 
-if ( gd_feature_enabled( 'GD_DISABLE_OEMBED_DISCOVERY' ) ) {
+if ( gd_feature_enabled( 'GD_BLOCK_OEMBED' ) ) {
 
     // Remove oEmbed discovery link from <head>.
     remove_action( 'wp_head', 'wp_oembed_add_discovery_links' );
@@ -784,7 +801,7 @@ if ( gd_feature_enabled( 'GD_NOINDEX_WARNING' ) ) {
 function gd_noindex_warning_notice() {
 
     // In non-production environments, noindex is expected. Don't nag.
-    if ( gd_feature_enabled( 'GD_ENVIRONMENT_AWARENESS' ) ) {
+    if ( gd_feature_enabled( 'GD_ENV_AWARENESS' ) ) {
         $env = gd_get_environment_type();
         if ( 'production' !== $env ) {
             return;
@@ -873,7 +890,7 @@ function gd_detect_noindex_settings() {
 function gd_noindex_warning_styles() {
 
     // Match the notice suppression — no styles needed on non-production.
-    if ( gd_feature_enabled( 'GD_ENVIRONMENT_AWARENESS' ) ) {
+    if ( gd_feature_enabled( 'GD_ENV_AWARENESS' ) ) {
         if ( 'production' !== gd_get_environment_type() ) {
             return;
         }
@@ -968,82 +985,82 @@ function gd_render_status_page() {
     $features = array(
         array(
             'label'    => 'Disable Comments',
-            'constant' => 'GD_DISABLE_COMMENTS',
+            'constant' => 'GD_BLOCK_COMMENTS',
             'desc'     => 'Hides comment UI, closes comments on all post types. Discussion settings page preserved for form spam filtering.',
         ),
         array(
             'label'    => 'Restrict REST API',
-            'constant' => 'GD_RESTRICT_REST_API',
+            'constant' => 'GD_LOCK_REST_API',
             'desc'     => 'REST API limited to Administrators. Plugin namespaces whitelisted for public access.',
         ),
         array(
             'label'    => 'Restrict XML-RPC',
-            'constant' => 'GD_RESTRICT_XMLRPC',
+            'constant' => 'GD_LOCK_XMLRPC',
             'desc'     => 'XML-RPC requires authentication. Pingback methods disabled.',
         ),
         array(
             'label'    => 'Remove Emoji Scripts',
-            'constant' => 'GD_REMOVE_EMOJI',
+            'constant' => 'GD_STRIP_EMOJI',
             'desc'     => 'Removes WordPress emoji JS/CSS (~10KB per page).',
         ),
         array(
             'label'    => 'Dashboard Support Widget',
-            'constant' => 'GD_DASHBOARD_WIDGET',
+            'constant' => 'GD_SUPPORT_WIDGET',
             'desc'     => 'Replaces WP Events & News widget with agency contact info.',
         ),
         array(
             'label'    => 'Disable Author Archives',
-            'constant' => 'GD_DISABLE_AUTHOR_ARCHIVES',
+            'constant' => 'GD_BLOCK_AUTHOR_PAGES',
             'desc'     => '301 redirects /author/ pages and /?author=N to homepage.',
         ),
         array(
             'label'    => 'Remove WP Version',
-            'constant' => 'GD_REMOVE_WP_VERSION',
+            'constant' => 'GD_HIDE_VERSION',
             'desc'     => 'Strips WordPress version from HTML source and RSS feeds.',
         ),
         array(
             'label'    => 'Disable Self-Pingbacks',
-            'constant' => 'GD_DISABLE_SELF_PINGBACKS',
+            'constant' => 'GD_BLOCK_SELF_PINGS',
             'desc'     => 'Prevents internal pingbacks when linking to own content.',
         ),
         array(
             'label'    => 'Disable Application Passwords',
-            'constant' => 'GD_DISABLE_APP_PASSWORDS',
+            'constant' => 'GD_BLOCK_APP_PASSWORDS',
             'desc'     => 'Removes WP 5.6+ application passwords feature. Reduces API attack surface.',
         ),
         array(
             'label'    => 'Environment Awareness',
-            'constant' => 'GD_ENVIRONMENT_AWARENESS',
+            'constant' => 'GD_ENV_AWARENESS',
             'desc'     => 'Colors admin bar by environment, suppresses noindex warning on staging/dev, warns about DISALLOW_FILE_EDIT on production.',
         ),
         array(
             'label'    => 'Disable Admin Email Check',
-            'constant' => 'GD_DISABLE_ADMIN_EMAIL_CHECK',
+            'constant' => 'GD_BLOCK_EMAIL_NAG',
             'desc'     => 'Removes the periodic admin email verification nag screen.',
         ),
         array(
             'label'    => 'Obscure Login Errors',
-            'constant' => 'GD_OBSCURE_LOGIN_ERRORS',
+            'constant' => 'GD_HIDE_LOGIN_ERRORS',
             'desc'     => 'Replaces specific login error messages with a generic response. Prevents username enumeration via login.',
         ),
         array(
             'label'    => 'Custom Admin Footer',
-            'constant' => 'GD_CUSTOM_ADMIN_FOOTER',
+            'constant' => 'GD_AGENCY_FOOTER',
             'desc'     => 'Replaces default WordPress admin footer with agency branding. Uses GD_SUPPORT_NAME and GD_SUPPORT_URL.',
         ),
         array(
             'label'    => 'Limit Post Revisions',
-            'constant' => 'GD_LIMIT_REVISIONS',
+            'constant' => 'GD_CAP_REVISIONS',
             'desc'     => 'Caps post revisions at 10 (default). Override with GD_REVISION_LIMIT or WP_POST_REVISIONS.',
         ),
         array(
             'label'    => 'Throttle Heartbeat API',
-            'constant' => 'GD_THROTTLE_HEARTBEAT',
+            'constant' => 'GD_SLOW_HEARTBEAT',
             'desc'     => 'Slows Heartbeat to 60s on non-editor pages. Editor pages keep the 15s default for autosave.',
         ),
         array(
             'label'    => 'Disable oEmbed Discovery',
-            'constant' => 'GD_DISABLE_OEMBED_DISCOVERY',
+            'constant' => 'GD_BLOCK_OEMBED',
             'desc'     => 'Prevents other sites from embedding your content. Consuming oEmbeds (YouTube, etc.) still works.',
         ),
         array(
@@ -1107,7 +1124,7 @@ function gd_render_status_page() {
         </table>
 
         <?php // ---- REST API details ---- ?>
-        <?php if ( gd_feature_enabled( 'GD_RESTRICT_REST_API' ) ) :
+        <?php if ( gd_feature_enabled( 'GD_LOCK_REST_API' ) ) :
             $rest_mode = defined( 'GD_REST_MODE' ) ? GD_REST_MODE : 'auto';
         ?>
         <h2 style="margin-top: 30px;">REST API Configuration</h2>
@@ -1198,7 +1215,7 @@ function gd_render_status_page() {
         <?php endif; ?>
 
         <?php // ---- Dashboard widget details ---- ?>
-        <?php if ( gd_feature_enabled( 'GD_DASHBOARD_WIDGET' ) ) : ?>
+        <?php if ( gd_feature_enabled( 'GD_SUPPORT_WIDGET' ) ) : ?>
         <h2 style="margin-top: 30px;">Dashboard Support Widget</h2>
         <table class="widefat fixed striped" style="max-width: 920px;">
             <tbody>
