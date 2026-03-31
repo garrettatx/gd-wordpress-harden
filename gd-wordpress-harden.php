@@ -2,7 +2,7 @@
 /**
  * Plugin Name: GD Site Hardening
  * Description: Garrett Digital agency-standard WordPress hardening. 18 features, all independently toggleable via wp-config.php constants. Disables comments, restricts REST API (auto and strict modes), blocks XML-RPC abuse, removes emoji scripts, adds dashboard support widget, disables author archives, removes version info, disables application passwords, detects environment type with colored admin bar, disables admin email verification nag, obscures login errors, adds custom admin footer, limits post revisions, throttles Heartbeat API, disables oEmbed discovery, and warns when search engine indexing is blocked.
- * Version: 1.3.1
+ * Version: 1.3.2
  * Author: Garrett Digital
  * Author URI: https://www.garrettdigital.com
  *
@@ -37,6 +37,7 @@
  *
  *   ENVIRONMENT & PERFORMANCE
  *   define( 'GD_ENV_AWARENESS',       false ); // No colored admin bar or environment detection
+ *   define( 'GD_WARN_FILE_EDIT',      false ); // No production warning about DISALLOW_FILE_EDIT
  *   define( 'GD_STRIP_EMOJI',         false ); // Emoji scripts stay loaded
  *   define( 'GD_CAP_REVISIONS',       false ); // Unlimited post revisions
  *   define( 'GD_SLOW_HEARTBEAT',      false ); // Default 15s heartbeat everywhere
@@ -108,6 +109,9 @@
  *
  * CHANGELOG
  * =========
+ * 1.3.2 - Separated file edit warning into its own toggle (GD_WARN_FILE_EDIT)
+ *         so you can keep the colored admin bar without the DISALLOW_FILE_EDIT
+ *         nag. Total features: 19.
  * 1.3.1 - Renamed all constants for intuitive true/false toggling. No more
  *         double negatives. true = feature ON, false = feature OFF. See
  *         README for the full rename map.
@@ -131,7 +135,7 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-define( 'GD_HARDENING_VERSION', '1.3.1' );
+define( 'GD_HARDENING_VERSION', '1.3.2' );
 
 /**
  * Helper: check if a feature is enabled.
@@ -574,21 +578,25 @@ if ( gd_feature_enabled( 'GD_ENV_AWARENESS' ) ) {
     add_action( 'wp_head', 'gd_environment_admin_bar_color' );
 
     // Warn on production if DISALLOW_FILE_EDIT is not enforced.
-    add_action( 'admin_notices', function () {
-        if ( 'production' !== gd_get_environment_type() ) {
-            return;
-        }
-        if ( defined( 'DISALLOW_FILE_EDIT' ) && DISALLOW_FILE_EDIT ) {
-            return;
-        }
-        if ( ! current_user_can( 'manage_options' ) ) {
-            return;
-        }
-        echo '<div class="notice notice-warning"><p>';
-        echo '<strong>GD Hardening:</strong> This is a production site but <code>DISALLOW_FILE_EDIT</code> is not enabled. ';
-        echo 'Add <code>define( \'DISALLOW_FILE_EDIT\', true );</code> to <code>wp-config.php</code>.';
-        echo '</p></div>';
-    });
+    // Has its own toggle so you can keep the colored admin bar
+    // without the file edit nag.
+    if ( gd_feature_enabled( 'GD_WARN_FILE_EDIT' ) ) {
+        add_action( 'admin_notices', function () {
+            if ( 'production' !== gd_get_environment_type() ) {
+                return;
+            }
+            if ( defined( 'DISALLOW_FILE_EDIT' ) && DISALLOW_FILE_EDIT ) {
+                return;
+            }
+            if ( ! current_user_can( 'manage_options' ) ) {
+                return;
+            }
+            echo '<div class="notice notice-warning"><p>';
+            echo '<strong>GD Hardening:</strong> This is a production site but <code>DISALLOW_FILE_EDIT</code> is not enabled. ';
+            echo 'Add <code>define( \'DISALLOW_FILE_EDIT\', true );</code> to <code>wp-config.php</code>.';
+            echo '</p></div>';
+        });
+    }
 }
 
 /**
@@ -1031,7 +1039,12 @@ function gd_render_status_page() {
         array(
             'label'    => 'Environment Awareness',
             'constant' => 'GD_ENV_AWARENESS',
-            'desc'     => 'Colors admin bar by environment, suppresses noindex warning on staging/dev, warns about DISALLOW_FILE_EDIT on production.',
+            'desc'     => 'Colors admin bar by environment, suppresses noindex warning on staging/dev.',
+        ),
+        array(
+            'label'    => 'File Edit Warning',
+            'constant' => 'GD_WARN_FILE_EDIT',
+            'desc'     => 'Warns on production if DISALLOW_FILE_EDIT is not set. Requires GD_ENV_AWARENESS to be on.',
         ),
         array(
             'label'    => 'Disable Admin Email Check',
